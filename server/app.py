@@ -177,6 +177,7 @@ async def record(ws: WebSocket, mid: str):
     try:
         m = _get(mid)
     except HTTPException:
+        await ws.send_json({"type": "error", "text": "This note no longer exists"})
         await ws.close(code=4404)
         return
     if not pipeline.gpu_lock.acquire(blocking=False):

@@ -49,7 +49,8 @@ function renderList() {
 // --------------------------------------------------------------- document
 async function open(id) {
   if (rec) { toast("Stop recording first"); return; }
-  cur = await api(`/api/meetings/${id}`);
+  try { cur = await api(`/api/meetings/${id}`); }
+  catch { toast("That note no longer exists"); await loadList(); return; }
   $("#empty").hidden = true; $("#doc").hidden = false; $("#bar").hidden = false;
   $("#chatPanel").hidden = true; $("#chatLog").innerHTML = "";
   $("#title").value = cur.title || "";
@@ -153,7 +154,24 @@ function addSegment(s) {
 }
 
 // --------------------------------------------------------------- recording
+async function newNote() {
+  const m = await api("/api/meetings", { method: "POST", body: {} });
+  await loadList(); await open(m.id);
+  return cur;
+}
+
+// Make sure the note we're about to record into exists on the server (it may have been
+// deleted elsewhere, or no note is open yet); fall back to a fresh note.
+async function ensureNote() {
+  if (cur) {
+    try { cur = await api(`/api/meetings/${cur.id}`); return cur; }
+    catch { toast("That note no longer exists — recording into a new note"); }
+  }
+  return newNote();
+}
+
 async function startRecording() {
+  const m = await ensureNote();
   const mic = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
   const streams = [mic];
@@ -172,24 +190,32 @@ async function startRecording() {
   for (const st of streams) ctx.createMediaStreamSource(st).connect(node);
   for (const st of streams) ctx.createMediaStreamSource(st).connect(analyser);
 
-  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/record/${cur.id}`);
+  const cleanup = () => { streams.forEach(s => s.getTracks().forEach(t => t.stop())); ctx.close(); };
+  const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/record/${m.id}`);
   ws.binaryType = "arraybuffer";
-  await new Promise((res, rej) => { ws.onopen = res; ws.onerror = () => rej(new Error("WebSocket failed")); });
-  node.port.onmessage = e => { if (ws.readyState === 1) ws.send(e.data.buffer); };
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
+    if (!cur || cur.id !== m.id) return;          // user navigated away mid-message
     if (msg.type === "segment") addSegment(msg.segment);
     else if (msg.type === "partial") $("#partial").textContent = msg.text;
     else if (msg.type === "status") $("#partial").textContent = msg.text;
     else if (msg.type === "error") toast(msg.text);
   };
+  // attach before awaiting open so an immediate server-side close is never missed
   ws.onclose = () => { if (rec && rec.ws === ws) stopRecording(true); };
+  try {
+    await new Promise((res, rej) => {
+      ws.onopen = res;
+      ws.onerror = () => rej(new Error("could not connect to the local server"));
+    });
+  } catch (e) { cleanup(); throw e; }
+  node.port.onmessage = e => { if (ws.readyState === 1) ws.send(e.data.buffer); };
 
-  const started = Date.now();
-  rec = { ws, ctx, streams, analyser, started };
+  rec = { ws, ctx, streams, analyser, started: Date.now(), meeting: m };
+  if (ws.readyState !== 1) { stopRecording(true); throw new Error("server closed the connection"); }
   $("#recBtn").classList.add("on");
   $("#transcript").hidden = false;
-  if (!cur.transcript.length) $("#txBody").innerHTML = "";
+  if (!(m.transcript || []).length) $("#txBody").innerHTML = "";
   tick();
 }
 function tick() {
@@ -217,11 +243,18 @@ async function stopRecording(remote) {
     await new Promise(res => { r.ws.onclose = res; setTimeout(res, 60000); });
   }
   $("#partial").textContent = "";
-  cur = await api(`/api/meetings/${cur.id}`);
-  renderTranscript(); renderSpeakers(); await loadList();
-  if (!cur.title && cur.transcript.length) {
-    const { title } = await api(`/api/meetings/${cur.id}/title`, { method: "POST" });
-    if (title) { $("#title").value = title; cur.title = title; await loadList(); }
+  const id = r.meeting.id;
+  let m;
+  try { m = await api(`/api/meetings/${id}`); }
+  catch { toast("Recording stopped — this note was removed"); await loadList(); return; }
+  if (cur && cur.id === id) { cur = m; renderTranscript(); renderSpeakers(); }
+  await loadList();
+  if (!m.title && m.transcript.length) {
+    try {
+      const { title } = await api(`/api/meetings/${id}/title`, { method: "POST" });
+      if (title && cur && cur.id === id) { $("#title").value = title; cur.title = title; }
+      await loadList();
+    } catch { /* title is a nicety */ }
   }
 }
 
@@ -278,8 +311,7 @@ async function ask(q) {
 // --------------------------------------------------------------- wiring
 $("#newBtn").onclick = async () => {
   if (rec) { toast("Stop recording first"); return; }
-  const m = await api("/api/meetings", { method: "POST", body: {} });
-  await loadList(); await open(m.id); $("#title").focus();
+  await newNote(); $("#title").focus();
 };
 $("#search").oninput = renderList;
 $("#title").oninput = e => saveSoon({ title: e.target.value });
@@ -308,7 +340,9 @@ $("#deleteBtn").onclick = async () => {
 };
 $("#recBtn").onclick = async () => {
   if (rec) return stopRecording(false);
-  try { await startRecording(); } catch (e) { toast("Could not start: " + e.message); rec = null; }
+  $("#recBtn").disabled = true;
+  try { await startRecording(); } catch (e) { console.error(e); toast("Could not start: " + e.message); }
+  $("#recBtn").disabled = false;
 };
 $("#txBtn").onclick = () => { $("#transcript").hidden = !$("#transcript").hidden; };
 $("#txClose").onclick = () => { $("#transcript").hidden = true; };
