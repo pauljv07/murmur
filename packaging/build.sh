@@ -37,4 +37,5 @@ codesign --verify --deep --strict "$APP"
 ZIP="$ROOT/dist/Murmur-$VERSION-macOS-arm64.zip"
 ditto -c -k --norsrc --noextattr --keepParent "$APP" "$ZIP"
 echo "built $APP"
+cp "$ZIP" "$ROOT/dist/Murmur-macOS-arm64.zip"   # stable name for releases/latest/download links
 echo "built $ZIP ($(du -h "$ZIP" | cut -f1))"
