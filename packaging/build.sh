@@ -15,7 +15,7 @@ chmod +x "$APP/Contents/MacOS/Murmur"
 
 cp -R "$ROOT/server" "$ROOT/web" "$R/"
 find "$R" -name __pycache__ -prune -exec rm -rf {} +
-cp "$ROOT/packaging/bootstrap.py" "$ROOT/requirements.lock" "$R/"
+cp "$ROOT/packaging/bootstrap.py" "$ROOT/requirements.lock" "$ROOT/packaging/THIRD_PARTY_NOTICES.md" "$R/"
 cp "$UV_BIN" "$R/uv" && chmod +x "$R/uv"
 swiftc -O -target arm64-apple-macos13.0 -o "$R/native/syscap" "$ROOT/native/syscap.swift"
 
@@ -35,6 +35,6 @@ codesign --force -s - "$APP"
 codesign --verify --deep --strict "$APP"
 
 ZIP="$ROOT/dist/Murmur-$VERSION-macOS-arm64.zip"
-ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+ditto -c -k --norsrc --noextattr --keepParent "$APP" "$ZIP"
 echo "built $APP"
 echo "built $ZIP ($(du -h "$ZIP" | cut -f1))"
