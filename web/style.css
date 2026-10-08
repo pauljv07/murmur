@@ -110,4 +110,4 @@ button, select { white-space: nowrap; }
 #vocabDlg h3 { font-family: var(--serif); margin: 4px 0 6px; }
 #vocabDlg textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 8px; outline: none; font: 14px/1.5 var(--sans); }
 #vocabDlg .row { display: flex; gap: 6px; margin-top: 10px; }
-#sidebar > #vocabBtn { text-align: left; }
+#sidebar > #vocabBtn, #sidebar > #quitBtn { text-align: left; }

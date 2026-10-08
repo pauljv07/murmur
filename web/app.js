@@ -331,6 +331,12 @@ $("#vocabBtn").onclick = async () => {
   $("#vocabText").value = (await api("/api/vocabulary")).text;
   $("#vocabDlg").showModal();
 };
+$("#quitBtn").onclick = async () => {
+  if (rec) { toast("Stop recording first"); return; }
+  if (!confirm("Quit Murmur? Your notes are saved. Open the Murmur app again to come back.")) return;
+  try { await api("/api/quit", { method: "POST" }); } catch (e) { toast(e.message); return; }
+  document.body.innerHTML = '<div class="empty"><h2>Murmur has quit</h2><p>Open the Murmur app to start it again.</p></div>';
+};
 $("#vocabSave").onclick = async () => {
   await api("/api/vocabulary", { method: "PUT", body: { text: $("#vocabText").value } });
   toast("Vocabulary saved");

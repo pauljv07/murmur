@@ -54,6 +54,15 @@ def status():
     return {"models": pipeline.status, "native_audio": sysaudio.available()}
 
 
+@app.post("/api/quit")
+def quit_app():
+    """Stop the local server (the Mac app has no window to close)."""
+    if pipeline.gpu_lock.locked():
+        raise HTTPException(409, "Stop the recording first")
+    threading.Timer(0.3, lambda: os._exit(0)).start()
+    return {"ok": True}
+
+
 @app.get("/api/templates")
 def templates():
     return {k: v[0] for k, v in llm.TEMPLATES.items()}

@@ -1,11 +1,14 @@
 """JSON-file meeting store. One file per meeting under data/meetings/."""
 import json
+import os
 import threading
 import time
 import uuid
 from pathlib import Path
 
-DATA = Path(__file__).resolve().parent.parent / "data"
+# MURMUR_DATA is set by the Mac app (~/Library/Application Support/Murmur/data);
+# running from a source checkout keeps data next to the code.
+DATA = Path(os.environ.get("MURMUR_DATA") or Path(__file__).resolve().parent.parent / "data")
 MEETINGS = DATA / "meetings"
 AUDIO = DATA / "audio"
 MEETINGS.mkdir(parents=True, exist_ok=True)

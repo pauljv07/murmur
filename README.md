@@ -4,9 +4,38 @@ Local AI meeting notes. Record a meeting, jot rough notes, then **Enhance** to m
 with the transcript. Speech recognition, speaker diarization and the language model all run
 on this Mac. No audio or text leaves the machine (after the one-time model download).
 
-## Run
+## Install (Mac app)
+
+**Requirements:** a Mac with Apple silicon (M1 or newer), macOS 14 or later, 16 GB of RAM
+recommended, about 12 GB of free disk space, and an internet connection for the first launch only.
+
+1. Download `Murmur-<version>-macOS-arm64.zip`, unzip it, and drag **Murmur.app** to Applications.
+2. Open it. Murmur isn't signed with an Apple Developer ID, so macOS blocks the first launch:
+   open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to
+   the Murmur message. (Alternatively, in Terminal: `xattr -dr com.apple.quarantine /Applications/Murmur.app`.)
+3. A setup page opens in your browser. The first launch installs a private Python environment and
+   downloads the models (~10 GB in total); this takes a while on a slow connection.
+4. When setup finishes the page turns into the app. Allow microphone access in the browser, and
+   allow **Screen & System Audio Recording** for Murmur when macOS asks (needed to capture the
+   other side of calls).
+
+Murmur runs in the background with no Dock icon: open the app again to bring the page back, and use
+**Quit Murmur** in the sidebar to stop it. Notes live in `~/Library/Application Support/Murmur/data`.
+To uninstall, delete the app and that `Murmur` folder (models are cached in `~/.cache/huggingface`).
+
+### Works offline
+
+After the first launch Murmur needs no internet connection. It loads every model from the local
+cache in strict offline mode, and the web UI loads nothing from external sites. It was tested
+with all network access blocked while recording, transcribing, enhancing and chatting: no
+connections left the machine.
+
+## Run from source
 
     ./run.sh              # then open http://127.0.0.1:8765
+
+Build the app yourself with `packaging/build.sh <path-to-uv-binary> <version>` (needs Xcode command
+line tools for the native audio helper; get `uv` for aarch64-apple-darwin from astral-sh/uv releases).
 
 Pick what to record in the bottom bar:
 
