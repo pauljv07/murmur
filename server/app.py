@@ -17,10 +17,15 @@ from fastapi.staticfiles import StaticFiles
 
 sys.path.insert(0, str(Path(__file__).parent))
 import llm  # noqa: E402
+import models  # noqa: E402
 import pipeline  # noqa: E402
 import store  # noqa: E402
 import sysaudio  # noqa: E402
 import vocab  # noqa: E402
+
+# Resolve transformers' lazy tokenizer exports once, on the main thread, before any worker
+# thread can race on them (see _model_load_lock).
+from transformers import AutoTokenizer, PreTrainedTokenizerFast  # noqa: E402,F401
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 for noisy in ("nemo_logger", "nemo", "NeMo"):
@@ -30,6 +35,20 @@ log = logging.getLogger("murmur")
 WEB = Path(__file__).resolve().parent.parent / "web"
 app = FastAPI(title="Murmur")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
+
+
+@app.middleware("http")
+async def revalidate_ui(request, call_next):
+    """Browsers must re-check the UI files (cheap 304s via ETag), so an updated app never shows
+    a stale cached page."""
+    resp = await call_next(request)
+    if request.url.path == "/" or request.url.path.startswith("/static/"):
+        resp.headers["Cache-Control"] = "no-cache"
+    return resp
+
+# All model loading happens one at a time: NeMo and mlx-lm both import `transformers`, and
+# importing it from two threads at once leaves it half-initialised (ImportError: AutoTokenizer).
+_model_load_lock = threading.Lock()
 
 EDITABLE = {"title", "notes", "enhanced", "template", "speakers", "vocabulary"}
 
@@ -51,7 +70,132 @@ def index():
 
 @app.get("/api/status")
 def status():
-    return {"models": pipeline.status, "native_audio": sysaudio.available()}
+    sel = models.settings()
+    names = {k: models.CATALOG[v]["name"] for k, v in (("asr", sel.get("asr")), ("llm", sel.get("llm"))) if v in models.CATALOG}
+    return {"models": pipeline.status, "native_audio": sysaudio.available(), "active": names}
+
+
+# ------------------------------------------------------------------ models (choose / download)
+
+def _load_in_background(kind: str):
+    def go():
+        with _model_load_lock:
+            _load(kind)
+
+    def _load(kind):
+        try:
+            if kind == "llm":
+                pipeline.status["Language model"] = "loading"
+                llm.load()
+                pipeline.status["Language model"] = "ready"
+            else:
+                pipeline.load_models()
+        except (llm.NoModel, pipeline.ModelMissing) as e:
+            log.info("%s", e)
+            if kind == "llm":
+                pipeline.status["Language model"] = "not installed"
+        except Exception:
+            log.exception("loading %s failed", kind)
+            if kind == "llm":
+                pipeline.status["Language model"] = "error"
+    threading.Thread(target=go, daemon=True).start()
+
+
+def _switch_asr() -> bool:
+    if not pipeline.gpu_lock.acquire(blocking=False):
+        return False
+    try:
+        pipeline.unload_asr()
+    finally:
+        pipeline.gpu_lock.release()
+    _load_in_background("asr")
+    return True
+
+
+def _download_finished(key: str):
+    kind = models.CATALOG[key]["kind"]
+    sel = models.settings()
+    if kind == "diar" or sel.get(kind) == key:
+        if kind == "asr":
+            _switch_asr()
+        else:
+            _load_in_background(kind)
+
+
+models.downloads.on_done = _download_finished
+
+
+@app.get("/api/models")
+def list_models():
+    return models.overview() | {"status": pipeline.status}
+
+
+@app.post("/api/models/{key}/download")
+def download_model(key: str):
+    if key not in models.CATALOG:
+        raise HTTPException(404, "unknown model")
+    need = models.CATALOG[key]["size"] + 1
+    if models.system_info()["free_gb"] < need:
+        raise HTTPException(507, f"Not enough disk space: {need:.1f} GB needed")
+    models.downloads.add(key)
+    return {"ok": True}
+
+
+@app.post("/api/models/{key}/use")
+def use_model(key: str):
+    m = models.CATALOG.get(key)
+    if not m or m["kind"] == "diar":
+        raise HTTPException(404, "unknown model")
+    if not models.installed(key):
+        raise HTTPException(409, "Download this model first")
+    if m["kind"] == "asr" and pipeline.gpu_lock.locked():
+        raise HTTPException(409, "Stop the recording first")
+    models.save_settings(**{m["kind"]: key})
+    if m["kind"] == "asr":
+        _switch_asr()
+    else:
+        _load_in_background("llm")
+    return models.overview()
+
+
+@app.delete("/api/models/{key}")
+def delete_model(key: str):
+    m = models.CATALOG.get(key)
+    if not m:
+        raise HTTPException(404, "unknown model")
+    if m["kind"] == "diar":
+        raise HTTPException(409, "Speaker detection is required")
+    if models.settings().get(m["kind"]) == key:
+        raise HTTPException(409, "This model is in use — choose another one first")
+    if (models.downloads.snapshot().get(key) or {}).get("status") in ("queued", "downloading"):
+        raise HTTPException(409, "Still downloading")
+    models.remove(key)
+    return models.overview()
+
+
+@app.post("/api/onboarding")
+def onboarding(body: dict = Body(...)):
+    """Welcome screen: save the choices and download whatever is missing."""
+    asr, llm_key = body.get("asr"), body.get("llm")
+    if asr not in models.CATALOG or models.CATALOG[asr]["kind"] != "asr":
+        raise HTTPException(400, "choose a transcription model")
+    if llm_key not in models.CATALOG or models.CATALOG[llm_key]["kind"] != "llm":
+        raise HTTPException(400, "choose a notes model")
+    missing = [k for k in ("diar", asr, llm_key) if not models.installed(k)]
+    need = sum(models.CATALOG[k]["size"] for k in missing) + 1
+    if missing and models.system_info()["free_gb"] < need:
+        raise HTTPException(507, f"Not enough disk space: about {need:.0f} GB needed")
+    prev = models.settings()
+    models.save_settings(asr=asr, llm=llm_key, onboarded=True)
+    for k in missing:
+        models.downloads.add(k)
+    if asr not in missing and prev.get("asr") != asr:
+        _switch_asr()
+    else:
+        _load_in_background("asr")
+    if llm_key not in missing:
+        _load_in_background("llm")
+    return models.overview()
 
 
 @app.post("/api/quit")
@@ -98,6 +242,11 @@ def delete_meeting(mid: str):
 
 def _sse(gen_fn):
     """Run a blocking text generator in a thread and stream it as server-sent events."""
+    try:
+        with _model_load_lock:
+            llm.load()
+    except llm.NoModel as e:
+        raise HTTPException(409, str(e))
     q: queue.Queue = queue.Queue()
 
     def worker():
@@ -126,7 +275,6 @@ def enhance(mid: str):
     m = _get(mid)
 
     def gen():
-        pipeline.status["Language model"] = "ready" if llm._model else "loading"
         out = ""
         for piece in llm.stream(llm.enhance_messages(m), max_tokens=2000):
             pipeline.status["Language model"] = "ready"
@@ -160,6 +308,13 @@ async def make_title(mid: str):
     m = _get(mid)
     if not (m["transcript"] or m["notes"].strip()):
         return {"title": ""}
+    def _load():
+        with _model_load_lock:
+            llm.load()
+    try:
+        await asyncio.to_thread(_load)
+    except llm.NoModel:
+        return {"title": ""}
     title = (await asyncio.to_thread(llm.complete, llm.title_messages(m), max_tokens=24, temp=0.2))
     title = title.strip().strip('"').strip().splitlines()[0][:80] if title.strip() else ""
     cur = store.get(mid)
@@ -190,6 +345,8 @@ async def reprocess(mid: str):
     try:
         segs, dur = await asyncio.to_thread(pipeline.reprocess, path, m.get("sessions"),
                                             vocab.meeting_terms(m))
+    except pipeline.ModelMissing as e:
+        raise HTTPException(409, str(e))
     finally:
         pipeline.gpu_lock.release()
     return store.update(mid, transcript=segs, duration=dur)
@@ -291,6 +448,8 @@ async def record(ws: WebSocket, mid: str):
                         sess.update_terms(vocab.meeting_terms(cur))
             sess.finish()
             _publish(sess)
+        except pipeline.ModelMissing as e:
+            send({"type": "error", "text": str(e)})
         except Exception as e:
             log.exception("live pipeline failed")
             send({"type": "error", "text": f"Transcription error: {e}"})
@@ -356,15 +515,27 @@ async def record(ws: WebSocket, mid: str):
 
 @app.on_event("startup")
 def warm():
-    """Load models in the background so the first recording starts quickly."""
+    """Load the selected, installed models in the background so recording starts quickly."""
     def go():
+        with _model_load_lock:
+            _warm()
+
+    def _warm():
         try:
             pipeline.load_models()
+        except pipeline.ModelMissing as e:
+            log.info("%s", e)
+        except Exception:
+            log.exception("speech model warm-up failed")
+        try:
             pipeline.status["Language model"] = "loading"
             llm.load()
             pipeline.status["Language model"] = "ready"
+        except llm.NoModel:
+            pipeline.status["Language model"] = "not installed"
         except Exception:
-            log.exception("model warm-up failed")
+            pipeline.status["Language model"] = "error"
+            log.exception("language model warm-up failed")
     threading.Thread(target=go, daemon=True).start()
 
 

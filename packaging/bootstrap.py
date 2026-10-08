@@ -1,10 +1,9 @@
 """Murmur first-run setup + launcher (standard library only).
 
-Started by the Mac app with a uv-managed Python 3.11. It serves a small progress page on the
-app's port while it (1) creates a private virtualenv from the pinned requirements and
-(2) downloads the speech and language models, then replaces itself with the real server on
-the same port, so the browser page simply turns into the app. Later launches skip straight
-to step 3 when nothing changed.
+Started by the Mac app with a uv-managed Python 3.11. On first launch it serves a small
+progress page on the app's port while it creates a private virtualenv from the pinned
+requirements, then replaces itself with the real server on the same port, so the browser page
+turns into the app — where the user picks and downloads models on the welcome screen.
 """
 import hashlib
 import http.server
@@ -25,11 +24,6 @@ PORT = int(os.environ.get("MURMUR_PORT", "8765"))
 URL = f"http://127.0.0.1:{PORT}/"
 UV = RES / "uv"
 LOCK = RES / "requirements.lock"
-MODELS = [
-    os.environ.get("MURMUR_ASR_MODEL", "nvidia/parakeet-tdt-0.6b-v3"),
-    os.environ.get("MURMUR_DIAR_MODEL", "nvidia/diar_streaming_sortformer_4spk-v2.1"),
-    os.environ.get("MURMUR_LLM", "mlx-community/Qwen3-8B-4bit"),
-]
 
 state = {"step": "Starting…", "detail": "", "progress": None, "error": None, "log": []}
 
@@ -62,8 +56,8 @@ pre{font-size:11px;color:var(--muted);white-space:pre-wrap;margin-top:24px;max-h
 .err{color:var(--err)}
 </style></head><body><main>
 <h1>Setting up Murmur</h1>
-<p class="note">First launch only: installing the local speech and language models (about 10 GB).
-Everything runs on this Mac — nothing you record is uploaded. You can leave this page open.</p>
+<p class="note">First launch only: installing Murmur's components (about 2 GB, a few minutes).
+Next you'll choose your AI models. Everything runs on this Mac — nothing you record is uploaded.</p>
 <div class="bar indef" id="bar"><i id="fill"></i></div>
 <div id="step">Starting…</div><div id="detail"></div><pre id="log"></pre>
 </main><script>
@@ -134,37 +128,6 @@ def run(cmd, env=None):
                            f"See {SUPPORT / 'murmur.log'}")
 
 
-DOWNLOAD = r'''
-import os, sys, threading, time
-from pathlib import Path
-from huggingface_hub import HfApi, snapshot_download, constants
-repos = sys.argv[1:]
-api = HfApi()
-total = 0
-for r in repos:
-    info = api.model_info(r, files_metadata=True)
-    total += sum((s.size or 0) for s in info.siblings)
-cache = Path(constants.HF_HUB_CACHE)
-def size():
-    n = 0
-    for r in repos:
-        d = cache / ("models--" + r.replace("/", "--")) / "blobs"
-        if d.exists():
-            n += sum(f.stat().st_size for f in d.iterdir() if f.is_file())
-    return n
-stop = False
-def report():
-    while not stop:
-        print(f"PROGRESS {min(size(), total)} {total}", flush=True); time.sleep(1)
-threading.Thread(target=report, daemon=True).start()
-for r in repos:
-    print(f"Downloading {r}", flush=True)
-    snapshot_download(r)
-stop = True
-print(f"PROGRESS {total} {total}", flush=True)
-'''
-
-
 def setup():
     marker = VENV / ".murmur-lock"
     if not (PY.exists() and marker.exists() and marker.read_text() == lock_hash()):
@@ -175,18 +138,10 @@ def setup():
         run([UV, "pip", "install", "--python", PY, "-r", LOCK])
         marker.write_text(lock_hash())
 
-    mmarker = SUPPORT / ".murmur-models"
-    want = "\n".join(MODELS)
-    if not (mmarker.exists() and mmarker.read_text() == want):
-        state.update(step="Downloading models", detail="Speech recognition, speaker diarization and "
-                     "the notes model — about 8 GB.", progress=0.0)
-        run([PY, "-c", DOWNLOAD, *MODELS], env={"HF_HUB_DISABLE_PROGRESS_BARS": "1"})
-        mmarker.write_text(want)
-
 
 def main():
     SUPPORT.mkdir(parents=True, exist_ok=True)
-    first_run = not (VENV / ".murmur-lock").exists() or not (SUPPORT / ".murmur-models").exists()
+    first_run = not (VENV / ".murmur-lock").exists()
     srv = None
     if first_run:
         srv = http.server.ThreadingHTTPServer(("127.0.0.1", PORT), Handler)
@@ -204,14 +159,14 @@ def main():
         while True:
             time.sleep(3600)
 
-    state.update(step="Starting Murmur…", detail="Loading models into memory.", progress=1.0)
+    state.update(step="Starting Murmur…", detail="", progress=1.0)
     log("starting server")
     if srv is not None:
         time.sleep(1.5)                 # let the page see the final state
         srv.shutdown()
         srv.server_close()
-    # Setup is complete, so from here on nothing needs the internet: load models strictly from
-    # the local cache instead of letting the libraries check Hugging Face for updates.
+    # Models load strictly from the local cache, never checking Hugging Face for updates, so
+    # Murmur works offline. (In-app model downloads run in a subprocess with network enabled.)
     env = {**os.environ, "MURMUR_DATA": str(SUPPORT / "data"), "MURMUR_PORT": str(PORT),
            "PYTHONUNBUFFERED": "1", "HF_HUB_OFFLINE": "1", "TRANSFORMERS_OFFLINE": "1",
            "HF_HUB_DISABLE_TELEMETRY": "1", "DO_NOT_TRACK": "1"}

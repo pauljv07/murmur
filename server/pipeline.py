@@ -21,10 +21,10 @@ import numpy as np
 import soundfile as sf
 import torch
 
+import models
 import vocab
 from diarize import FRAME_SEC, SR, StreamingDiarizer, configure, load_model as load_diar, LIVE_CFG
 
-ASR_MODEL = os.environ.get("MURMUR_ASR_MODEL", "nvidia/parakeet-tdt-0.6b-v3")
 DIAR_DEVICE = os.environ.get("MURMUR_DIAR_DEVICE", "mps" if torch.backends.mps.is_available() else "cpu")
 ASR_DEVICE = os.environ.get("MURMUR_ASR_DEVICE", "cpu")
 BOOST_ALPHA = float(os.environ.get("MURMUR_BOOST_ALPHA", "1.0"))
@@ -46,26 +46,56 @@ _load_lock = threading.Lock()
 gpu_lock = threading.Lock()   # one recording / reprocess at a time
 
 
+class ModelMissing(RuntimeError):
+    pass
+
+
+def _available(kind: str) -> bool:
+    if os.environ.get({"asr": "MURMUR_ASR_MODEL", "diar": "MURMUR_DIAR_MODEL"}[kind]):
+        return True
+    key = models.settings().get("asr") if kind == "asr" else "diar"
+    return key in models.CATALOG and models.installed(key)
+
+
 def load_models():
-    global _asr, _diar, _base_decoding
+    """Load the selected speech models (from the local cache only)."""
+    global _asr, _diar, _base_decoding, _boost_terms
     with _load_lock:
         if _asr is None:
+            if not _available("asr"):
+                status["Speech recognition"] = "not installed"
+                raise ModelMissing("No speech recognition model installed — open Models to download one.")
             status["Speech recognition"] = "loading"
             from nemo.collections.asr.models import ASRModel
-            asr = ASRModel.from_pretrained(ASR_MODEL, map_location=ASR_DEVICE)
+            asr = ASRModel.from_pretrained(models.repo_for("asr"), map_location=ASR_DEVICE)
             asr.eval()
             _base_decoding = copy.deepcopy(asr.cfg.decoding)
+            _boost_terms = ()
             _asr = asr
             status["Speech recognition"] = "ready"
         if _diar is None:
+            if not _available("diar"):
+                status["Speaker diarization"] = "not installed"
+                raise ModelMissing("Speaker detection model not installed — open Models to download it.")
             status["Speaker diarization"] = "loading"
             try:
-                _diar = load_diar(DIAR_DEVICE)
+                _diar = load_diar(DIAR_DEVICE, models.repo_for("diar"))
             except Exception:
                 log.exception("diarizer on %s failed, using cpu", DIAR_DEVICE)
-                _diar = load_diar("cpu")
+                _diar = load_diar("cpu", models.repo_for("diar"))
             status["Speaker diarization"] = "ready"
     return _asr, _diar
+
+
+def unload_asr():
+    """Drop the speech model so the next load_models() picks up a newly selected one.
+    Callers hold gpu_lock (no recording in progress)."""
+    global _asr
+    import gc
+    with _load_lock:
+        _asr = None
+    gc.collect()
+    status["Speech recognition"] = "not loaded"
 
 
 # ------------------------------------------------------------------ ASR

@@ -7,17 +7,18 @@ on this Mac. No audio or text leaves the machine (after the one-time model downl
 ## Install (Mac app)
 
 **Requirements:** a Mac with Apple silicon (M1 or newer), macOS 14 or later, 16 GB of RAM
-recommended, about 12 GB of free disk space, and an internet connection for the first launch only.
+recommended, 5–15 GB of free disk space depending on the models you pick, and an internet connection for the first launch only.
 
 1. Download `Murmur-<version>-macOS-arm64.zip`, unzip it, and drag **Murmur.app** to Applications.
 2. Open it. Murmur isn't signed with an Apple Developer ID, so macOS blocks the first launch:
    open **System Settings → Privacy & Security**, scroll down, and click **Open Anyway** next to
    the Murmur message. (Alternatively, in Terminal: `xattr -dr com.apple.quarantine /Applications/Murmur.app`.)
-3. A setup page opens in your browser. The first launch installs a private Python environment and
-   downloads the models (~10 GB in total); this takes a while on a slow connection.
-4. When setup finishes the page turns into the app. Allow microphone access in the browser, and
-   allow **Screen & System Audio Recording** for Murmur when macOS asks (needed to capture the
-   other side of calls).
+3. A setup page opens in your browser and installs Murmur's components (~2 GB, a few minutes).
+4. On the **Welcome** screen pick your models — transcription (English or multilingual) and the notes
+   AI (Light / Fast / Balanced / Best). The best fit for your Mac's memory is pre-selected; one click
+   downloads them. Change, add or remove models any time under **Models** in the sidebar.
+5. Allow microphone access in the browser, and allow **Screen & System Audio Recording** for Murmur
+   when macOS asks (needed to capture the other side of calls).
 
 Murmur runs in the background with no Dock icon: open the app again to bring the page back, and use
 **Quit Murmur** in the sidebar to stop it. Notes live in `~/Library/Application Support/Murmur/data`.
@@ -90,3 +91,10 @@ Benchmark (synthetic 3-person call, 42 s, remote audio leaking into the mic at �
   the speaker with the highest Sortformer activity over that word's time span.
 - **Refine** re-runs both models over the whole saved recording for a cleaner transcript.
 - Data lives in `data/` (JSON per meeting + WAV).
+
+## Credits
+
+The interface's visual style (neutral palette, composer box, sidebar) is modelled on the
+[llama.cpp](https://github.com/ggml-org/llama.cpp) web UI (MIT License). Models: NVIDIA Parakeet and
+Streaming Sortformer (NeMo), Qwen3 (Apache 2.0) via MLX; they are downloaded from Hugging Face on
+first use, not bundled.

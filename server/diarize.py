@@ -23,12 +23,12 @@ LIVE_CFG = dict(chunk_len=int(os.environ.get("MURMUR_DIAR_CHUNK", "31")),
                 fifo_len=124, spkcache_refresh_rate=124, spkcache_len=188)
 
 
-def load_model(device: str = "cpu"):
+def load_model(device: str = "cpu", repo: str = DIAR_MODEL):
     from nemo.collections.asr.models import SortformerEncLabelModel
-    if DIAR_MODEL.endswith(".nemo"):
-        m = SortformerEncLabelModel.restore_from(DIAR_MODEL, map_location=device)
+    if repo.endswith(".nemo"):
+        m = SortformerEncLabelModel.restore_from(repo, map_location=device)
     else:
-        m = SortformerEncLabelModel.from_pretrained(DIAR_MODEL, map_location=device)
+        m = SortformerEncLabelModel.from_pretrained(repo, map_location=device)
     m.eval()
     configure(m, LIVE_CFG)
     return m

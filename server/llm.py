@@ -2,7 +2,6 @@
 import os
 import threading
 
-MODEL_ID = os.environ.get("MURMUR_LLM", "mlx-community/Qwen3-8B-4bit")
 MAX_TRANSCRIPT_CHARS = int(os.environ.get("MURMUR_MAX_TRANSCRIPT_CHARS", "60000"))
 
 _model = None
@@ -11,13 +10,41 @@ _load_lock = threading.Lock()
 _gen_lock = threading.Lock()  # MLX generation is not re-entrant on one model
 
 
+_loaded_repo = None
+
+
+class NoModel(RuntimeError):
+    pass
+
+
 def load():
-    global _model, _tok
+    """Load the selected notes model from the local cache (switches if the selection changed)."""
+    global _model, _tok, _loaded_repo
+    import models
+    repo = models.repo_for("llm")
+    key = models.settings().get("llm")
+    if repo is None or (not os.environ.get("MURMUR_LLM") and not models.installed(key)):
+        raise NoModel("No notes model installed yet — choose one in Models (sidebar).")
     with _load_lock:
-        if _model is None:
-            from mlx_lm import load as mlx_load
-            _model, _tok = mlx_load(MODEL_ID)
+        if _model is None or _loaded_repo != repo:
+            with _gen_lock:
+                unload()
+                from mlx_lm import load as mlx_load
+                _model, _tok = mlx_load(repo)
+                _loaded_repo = repo
     return _model, _tok
+
+
+def unload():
+    global _model, _tok, _loaded_repo
+    import gc
+    _model, _tok, _loaded_repo = None, None, None
+    gc.collect()
+    try:
+        import mlx.core as mx
+        mx.clear_cache()
+    except Exception:
+        pass
 
 
 def stream(messages: list[dict], max_tokens: int = 1500, temp: float = 0.3):

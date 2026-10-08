@@ -4,65 +4,120 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Murmur</title>
+<script>
+  // apply the theme before first paint (system by default, or the saved choice)
+  (function () {
+    var t = "system";
+    try { t = localStorage.getItem("murmur.theme") || "system"; } catch (e) {}
+    var dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+    document.documentElement.classList.toggle("dark", dark);
+  })();
+</script>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <defs>
+    <symbol id="i-plus" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></symbol>
+    <symbol id="i-search" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></symbol>
+    <symbol id="i-mic" viewBox="0 0 24 24"><rect x="9" y="2" width="6" height="12" rx="3"/><path d="M5 10v1a7 7 0 0 0 14 0v-1M12 18v4"/></symbol>
+    <symbol id="i-stop" viewBox="0 0 24 24"><rect x="6" y="6" width="12" height="12" rx="2"/></symbol>
+    <symbol id="i-sparkles" viewBox="0 0 24 24"><path d="M12 3l1.8 4.7L18.5 9.5l-4.7 1.8L12 16l-1.8-4.7L5.5 9.5l4.7-1.8z"/><path d="M19 15l.7 1.8 1.8.7-1.8.7L19 20l-.7-1.8-1.8-.7 1.8-.7z"/></symbol>
+    <symbol id="i-arrow-up" viewBox="0 0 24 24"><path d="M12 19V5M6 11l6-6 6 6"/></symbol>
+    <symbol id="i-panel" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M15 4v16"/></symbol>
+    <symbol id="i-cpu" viewBox="0 0 24 24"><rect x="5" y="5" width="14" height="14" rx="2"/><rect x="9" y="9" width="6" height="6" rx="1"/><path d="M9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M2 15h3M19 9h3M19 15h3"/></symbol>
+    <symbol id="i-book" viewBox="0 0 24 24"><path d="M4 19V5a2 2 0 0 1 2-2h13v15H6a2 2 0 0 0-2 2 2 2 0 0 0 2 2h13"/><path d="M9 8h6"/></symbol>
+    <symbol id="i-power" viewBox="0 0 24 24"><path d="M12 3v9"/><path d="M6.3 7a8 8 0 1 0 11.4 0"/></symbol>
+    <symbol id="i-sun" viewBox="0 0 24 24"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></symbol>
+    <symbol id="i-moon" viewBox="0 0 24 24"><path d="M20 14.5A8 8 0 1 1 9.5 4a6.5 6.5 0 0 0 10.5 10.5z"/></symbol>
+    <symbol id="i-monitor" viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="12" rx="2"/><path d="M8 20h8M12 16v4"/></symbol>
+    <symbol id="i-x" viewBox="0 0 24 24"><path d="M18 6 6 18M6 6l12 12"/></symbol>
+    <symbol id="i-copy" viewBox="0 0 24 24"><rect x="9" y="9" width="12" height="12" rx="2"/><path d="M5 15H4a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h10a1 1 0 0 1 1 1v1"/></symbol>
+    <symbol id="i-trash" viewBox="0 0 24 24"><path d="M4 7h16M10 11v6M14 11v6M9 7V4h6v3M6 7l1 13h10l1-13"/></symbol>
+    <symbol id="i-pencil" viewBox="0 0 24 24"><path d="M16 4l4 4L8 20H4v-4z"/></symbol>
+    <symbol id="i-refresh" viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.7L20 8.5"/><path d="M20 3.5v5h-5"/></symbol>
+    <symbol id="i-logo" viewBox="0 0 24 24"><path d="M4 10v4M8 6v12M12 3v18M16 7v10M20 10v4"/></symbol>
+  </defs>
+</svg>
+
 <aside id="sidebar">
-  <div class="brand"><span class="dot"></span> Murmur</div>
-  <button id="newBtn" class="primary wide">＋ New note</button>
-  <input id="search" type="search" placeholder="Search notes">
+  <div class="side-head">
+    <div class="brand"><svg class="i logo"><use href="#i-logo"/></svg> Murmur</div>
+  </div>
+  <div class="side-actions">
+    <button id="newBtn" class="btn outline wide"><svg class="i"><use href="#i-plus"/></svg> New note</button>
+    <label class="searchbox"><svg class="i"><use href="#i-search"/></svg><input id="search" type="search" placeholder="Search notes"></label>
+  </div>
   <nav id="list"></nav>
-  <button id="vocabBtn" class="ghost small">Custom vocabulary…</button>
-  <button id="quitBtn" class="ghost small">Quit Murmur</button>
-  <div id="modelStatus" class="status"></div>
+  <div class="side-foot">
+    <button id="modelsBtn" class="navrow"><svg class="i"><use href="#i-cpu"/></svg> Models</button>
+    <button id="vocabBtn" class="navrow"><svg class="i"><use href="#i-book"/></svg> Custom vocabulary</button>
+    <button id="themeBtn" class="navrow"><svg class="i"><use id="themeIcon" href="#i-monitor"/></svg> <span id="themeLabel">Theme: System</span></button>
+    <button id="quitBtn" class="navrow"><svg class="i"><use href="#i-power"/></svg> Quit Murmur</button>
+    <div id="modelStatus" class="status"></div>
+  </div>
 </aside>
 
 <main id="main">
   <div id="empty" class="empty">
-    <h2>Local meeting notes</h2>
-    <p>Press <b>New note</b>, start recording, and jot rough notes. When you're done,
-      <b>Enhance</b> merges your notes with the transcript. Everything — speech recognition,
-      speaker diarization and the language model — runs on this machine.</p>
+    <div class="hero-logo"><svg class="i"><use href="#i-logo"/></svg></div>
+    <h2>Murmur</h2>
+    <p>Private meeting notes that run entirely on your Mac.</p>
+    <p class="muted">Start a <b>New note</b>, record your meeting and jot rough notes.
+      <b>Enhance</b> turns them into clean notes using the transcript.</p>
   </div>
 
   <section id="doc" hidden>
-    <input id="title" placeholder="Untitled meeting" autocomplete="off">
-    <div class="meta">
-      <span id="date"></span>
-      <span id="speakers"></span>
+    <div class="doc-inner">
+      <input id="title" placeholder="Untitled meeting" autocomplete="off">
+      <div class="meta">
+        <span id="date"></span>
+        <span id="speakers"></span>
+      </div>
+      <input id="vocab" class="vocab" placeholder="Vocabulary for this meeting — names, products, jargon (comma separated)" autocomplete="off">
+      <div class="tabbar">
+        <div class="tabs" role="tablist">
+          <button data-tab="notes" class="tab active">My notes</button>
+          <button data-tab="enhanced" class="tab">Enhanced</button>
+        </div>
+        <span class="spacer"></span>
+        <button id="editEnhanced" class="btn ghost sm" hidden><svg class="i"><use href="#i-pencil"/></svg> <span>Edit</span></button>
+        <button id="copyBtn" class="btn ghost sm icon" title="Copy as Markdown"><svg class="i"><use href="#i-copy"/></svg></button>
+        <button id="deleteBtn" class="btn ghost sm icon danger" title="Delete meeting"><svg class="i"><use href="#i-trash"/></svg></button>
+      </div>
+      <textarea id="notes" placeholder="Write rough notes here while you listen…"></textarea>
+      <div id="enhancedView" class="md" hidden></div>
+      <textarea id="enhancedEdit" hidden></textarea>
     </div>
-    <input id="vocab" class="vocab" placeholder="Vocabulary for this meeting — names, products, jargon (comma separated)" autocomplete="off">
-    <div class="tabs">
-      <button data-tab="notes" class="tab active">My notes</button>
-      <button data-tab="enhanced" class="tab">Enhanced</button>
-      <span class="spacer"></span>
-      <button id="editEnhanced" class="ghost small" hidden>Edit</button>
-      <button id="copyBtn" class="ghost small">Copy</button>
-      <button id="deleteBtn" class="ghost small danger">Delete</button>
-    </div>
-    <textarea id="notes" placeholder="Write rough notes here while you listen…"></textarea>
-    <div id="enhancedView" class="md" hidden></div>
-    <textarea id="enhancedEdit" hidden></textarea>
   </section>
 
   <div id="chatPanel" hidden>
+    <div class="chat-head"><span class="muted">Ask about this meeting</span><span class="spacer"></span>
+      <button id="chatClose" class="btn ghost sm icon" title="Close"><svg class="i"><use href="#i-x"/></svg></button></div>
     <div id="chatLog"></div>
   </div>
 
   <div id="bar" hidden>
-    <button id="recBtn" class="rec" title="Start / stop recording">
-      <span class="recdot"></span><canvas id="meter" width="44" height="22"></canvas>
-      <span id="recLabel">Record</span>
-    </button>
-    <select id="source" title="What to record. Capturing computer audio separately from your mic gives the most accurate transcript: you are labelled 'Me' and remote speakers are separated by voice.">
-      <option value="native">Mic + computer audio</option>
-      <option value="browser">Mic + shared tab/screen</option>
-      <option value="none">Mic only (in person)</option>
-    </select>
-    <button id="txBtn" class="ghost">Transcript</button>
-    <select id="template"></select>
-    <button id="enhanceBtn" class="primary">✦ Enhance</button>
-    <form id="askForm"><input id="ask" placeholder="Ask about this meeting…" autocomplete="off"></form>
+    <form id="askForm" class="composer">
+      <textarea id="ask" rows="1" placeholder="Ask anything about this meeting…" autocomplete="off"></textarea>
+      <div class="toolbar">
+        <button type="button" id="recBtn" class="btn rec" title="Start / stop recording">
+          <svg class="i mic"><use href="#i-mic"/></svg><svg class="i stop"><use href="#i-stop"/></svg>
+          <canvas id="meter" width="44" height="22"></canvas>
+          <span id="recLabel">Record</span>
+        </button>
+        <select id="source" class="select" title="What to record. Capturing computer audio separately from your mic gives the most accurate transcript: you are labelled 'Me' and remote speakers are separated by voice.">
+          <option value="native">Mic + computer audio</option>
+          <option value="browser">Mic + shared tab/screen</option>
+          <option value="none">Mic only (in person)</option>
+        </select>
+        <select id="template" class="select" title="Notes template"></select>
+        <span class="spacer"></span>
+        <button type="button" id="txBtn" class="btn ghost icon" title="Show transcript"><svg class="i"><use href="#i-panel"/></svg></button>
+        <button type="button" id="enhanceBtn" class="btn outline"><svg class="i"><use href="#i-sparkles"/></svg> <span class="lbl">Enhance</span></button>
+        <button type="submit" id="sendBtn" class="btn primary round" title="Ask"><svg class="i"><use href="#i-arrow-up"/></svg></button>
+      </div>
+    </form>
   </div>
 </main>
 
@@ -70,26 +125,55 @@
   <header>
     <b>Transcript</b>
     <span class="spacer"></span>
-    <button id="redoBtn" class="ghost small" title="Re-run diarization and transcription on the full recording for higher accuracy">Refine</button>
-    <button id="txClose" class="ghost small">✕</button>
+    <button id="redoBtn" class="btn ghost sm" title="Re-run diarization and transcription on the full recording for higher accuracy"><svg class="i"><use href="#i-refresh"/></svg> Refine</button>
+    <button id="txClose" class="btn ghost sm icon" title="Close"><svg class="i"><use href="#i-x"/></svg></button>
   </header>
   <div id="txBody"></div>
   <div id="partial"></div>
 </aside>
 
+<div id="onboard" hidden>
+  <div class="ob-card">
+    <div class="hero-logo"><svg class="i"><use href="#i-logo"/></svg></div>
+    <h1>Welcome to Murmur</h1>
+    <p class="lead">Private meeting notes that run entirely on your Mac. Pick your AI models —
+      we've pre-selected the best fit for this Mac. You can change them any time in <b>Models</b>.</p>
+    <p class="sysline" id="obSys"></p>
+    <h3>Transcription</h3>
+    <div class="opts" id="obAsr"></div>
+    <h3>Notes AI <span class="hint">writes your notes and answers questions</span></h3>
+    <div class="opts" id="obLlm"></div>
+    <p class="hint">Speaker detection (NVIDIA Sortformer, 0.5 GB) is included automatically.</p>
+    <div id="obProgress"></div>
+    <button id="obGo" class="btn primary big"></button>
+    <p class="hint center" id="obNote">Downloads once, then works without internet.</p>
+  </div>
+</div>
+
+<dialog id="modelsDlg">
+  <form method="dialog">
+    <div class="dlg-head"><h3>Models</h3><span class="spacer"></span><button value="close" class="btn ghost sm icon"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <p class="sysline" id="mdSys"></p>
+    <h4>Transcription</h4><div class="mlist" id="mdAsr"></div>
+    <h4>Notes AI</h4><div class="mlist" id="mdLlm"></div>
+    <h4>Speaker detection</h4><div class="mlist" id="mdDiar"></div>
+  </form>
+</dialog>
+
 <dialog id="vocabDlg">
   <form method="dialog">
-    <h3>Custom vocabulary</h3>
-    <p class="status">Names, companies, products and jargon used across all your meetings — one per line.
+    <div class="dlg-head"><h3>Custom vocabulary</h3><span class="spacer"></span><button value="cancel" class="btn ghost sm icon"><svg class="i"><use href="#i-x"/></svg></button></div>
+    <p class="muted small">Names, companies, products and jargon used across all your meetings — one per line.
       They are boosted in speech recognition and used to correct spellings. Names you write in a
       meeting's notes or title are picked up automatically.</p>
     <textarea id="vocabText" rows="12"></textarea>
-    <div class="row"><span class="spacer"></span><button value="cancel" class="ghost">Cancel</button>
-      <button id="vocabSave" value="save" class="primary">Save</button></div>
+    <div class="dlg-foot"><button value="cancel" class="btn outline">Cancel</button>
+      <button id="vocabSave" value="save" class="btn primary">Save</button></div>
   </form>
 </dialog>
 
 <script src="/static/md.js"></script>
 <script src="/static/app.js"></script>
+<script src="/static/models.js"></script>
 </body>
 </html>

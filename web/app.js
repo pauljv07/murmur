@@ -2,16 +2,20 @@ const $ = s => document.querySelector(s);
 const api = async (path, opts = {}) => {
   const r = await fetch(path, { headers: { "Content-Type": "application/json" }, ...opts,
     body: opts.body && typeof opts.body !== "string" ? JSON.stringify(opts.body) : opts.body });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) throw new Error(await errText(r));
   return r.json();
 };
+async function errText(r) {
+  const t = await r.text();
+  try { return JSON.parse(t).detail || t; } catch { return t; }
+}
 const toast = msg => {
   const t = document.createElement("div"); t.className = "toast"; t.textContent = msg;
   document.body.append(t); setTimeout(() => t.remove(), 2600);
 };
 const fmtTime = s => { s = Math.floor(s); return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
 const COLORS = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s0)"];
-const colorOf = spk => String(spk) === "me" ? "var(--accent)" : COLORS[+spk % 4];
+const colorOf = spk => String(spk) === "me" ? "var(--me)" : COLORS[+spk % 4];
 
 let meetings = [], cur = null, tab = "notes", rec = null, busy = false;
 
@@ -269,7 +273,7 @@ async function stopRecording(remote) {
 // --------------------------------------------------------------- streaming LLM calls
 async function streamSSE(path, body, onText) {
   const r = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body || {}) });
-  if (!r.ok) throw new Error(await r.text());
+  if (!r.ok) throw new Error(await errText(r));
   const rd = r.body.getReader(), dec = new TextDecoder(); let buf = "";
   for (;;) {
     const { value, done } = await rd.read(); if (done) break;
@@ -289,14 +293,14 @@ async function enhance() {
   if (busy) return;
   if (rec) { toast("Stop recording first"); return; }
   if (!cur.transcript.length && !cur.notes.trim()) { toast("Nothing to enhance yet"); return; }
-  busy = true; $("#enhanceBtn").disabled = true; $("#enhanceBtn").textContent = "Writing…";
+  busy = true; $("#enhanceBtn").disabled = true; $("#enhanceBtn .lbl").textContent = "Writing…";
   await api(`/api/meetings/${cur.id}`, { method: "PATCH", body: { notes: $("#notes").value, template: $("#template").value } });
   cur.notes = $("#notes").value; cur.enhanced = ""; setTab("enhanced"); renderEnhanced(true);
   try {
     await streamSSE(`/api/meetings/${cur.id}/enhance`, {}, t => { cur.enhanced += t; renderEnhanced(true); });
   } catch (e) { toast("Enhance failed: " + e.message); }
   renderEnhanced(); setTab("enhanced");
-  busy = false; $("#enhanceBtn").disabled = false; $("#enhanceBtn").textContent = "✦ Enhance";
+  busy = false; $("#enhanceBtn").disabled = false; $("#enhanceBtn .lbl").textContent = "Enhance";
 }
 
 async function ask(q) {
@@ -373,7 +377,33 @@ $("#txClose").onclick = () => { $("#transcript").hidden = true; };
 $("#enhanceBtn").onclick = enhance;
 $("#askForm").onsubmit = e => {
   e.preventDefault(); const q = $("#ask").value.trim(); if (!q) return;
-  $("#ask").value = ""; ask(q);
+  $("#ask").value = ""; autosize(); ask(q);
+};
+// composer: Enter sends, Shift+Enter adds a line; grows with its content
+const autosize = () => { const a = $("#ask"); a.style.height = "auto"; a.style.height = Math.min(a.scrollHeight, 160) + "px"; };
+$("#ask").addEventListener("input", autosize);
+$("#ask").addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); $("#askForm").requestSubmit(); }
+});
+$("#chatClose").onclick = () => { $("#chatPanel").hidden = true; };
+
+// theme: System -> Light -> Dark
+const THEMES = ["system", "light", "dark"];
+const THEME_ICON = { system: "#i-monitor", light: "#i-sun", dark: "#i-moon" };
+function applyTheme(t) {
+  const dark = t === "dark" || (t === "system" && matchMedia("(prefers-color-scheme: dark)").matches);
+  document.documentElement.classList.toggle("dark", dark);
+  $("#themeIcon").setAttribute("href", THEME_ICON[t]);
+  $("#themeLabel").textContent = "Theme: " + t[0].toUpperCase() + t.slice(1);
+}
+let theme = "system";
+try { theme = localStorage.getItem("murmur.theme") || "system"; } catch {}
+applyTheme(theme);
+matchMedia("(prefers-color-scheme: dark)").addEventListener("change", () => applyTheme(theme));
+$("#themeBtn").onclick = () => {
+  theme = THEMES[(THEMES.indexOf(theme) + 1) % THEMES.length];
+  try { localStorage.setItem("murmur.theme", theme); } catch {}
+  applyTheme(theme);
 };
 $("#redoBtn").onclick = async () => {
   if (rec || busy) return;
@@ -394,10 +424,14 @@ async function pollStatus() {
     const nat = $("#source option[value=native]");
     nat.disabled = !s.native_audio;
     if (!s.native_audio && $("#source").value === "native") $("#source").value = "browser";
+    const label = { "Speech recognition": "Transcription" + (s.active.asr ? ` (${s.active.asr})` : ""),
+                    "Speaker diarization": "Speaker detection",
+                    "Language model": "Notes AI" + (s.active.llm ? ` (${s.active.llm})` : "") };
     $("#modelStatus").innerHTML = Object.entries(s.models)
-      .map(([k, v]) => `<div>${v === "ready" ? '<span class="ok">●</span>' : "○"} ${k}: ${v}</div>`).join("");
-    if (Object.values(s.models).some(v => v !== "ready")) setTimeout(pollStatus, 3000);
-  } catch { setTimeout(pollStatus, 3000); }
+      .map(([k, v]) => `<div>${v === "ready" ? '<span class="ok">●</span>' : "○"} ${label[k] || k} · ${v}</div>`).join("");
+    clearTimeout(pollStatus.t);
+    pollStatus.t = setTimeout(pollStatus, Object.values(s.models).some(v => v !== "ready") ? 2000 : 8000);
+  } catch { clearTimeout(pollStatus.t); pollStatus.t = setTimeout(pollStatus, 3000); }
 }
 
 (async () => {
