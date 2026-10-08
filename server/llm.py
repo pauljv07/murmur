@@ -66,7 +66,8 @@ def format_transcript(m: dict) -> str:
     names = m.get("speakers", {})
     lines = []
     for s in m.get("transcript", []):
-        who = names.get(str(s["speaker"])) or f"Speaker {int(s['speaker']) + 1}"
+        spk = str(s["speaker"])
+        who = names.get(spk) or ("Me" if spk == "me" else f"Speaker {int(spk) + 1}")
         mm, ss = divmod(int(s["start"]), 60)
         lines.append(f"[{mm:02d}:{ss:02d}] {who}: {s['text']}")
     text = "\n".join(lines)
@@ -92,6 +93,12 @@ def enhance_messages(m: dict) -> list[dict]:
         "- Use ### for section headings and '-' for bullets.\n"
         f"- Template: {name}. {structure}"
     )
+    import vocab
+    terms = vocab.meeting_terms(m)
+    if terms:
+        sys += ("\n- Spell these names/terms exactly as given (the transcript may misspell them): "
+                + ", ".join(terms[:80]))
+    sys += "\n- 'Me' in the transcript is the user (the person taking these notes)."
     user = (
         f"Meeting title: {m.get('title') or '(untitled)'}\n\n"
         f"## My notes\n{m.get('notes') or '(none)'}\n\n"

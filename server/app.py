@@ -6,6 +6,7 @@ import os
 import queue
 import sys
 import threading
+import time
 from pathlib import Path
 
 import numpy as np
@@ -18,6 +19,8 @@ sys.path.insert(0, str(Path(__file__).parent))
 import llm  # noqa: E402
 import pipeline  # noqa: E402
 import store  # noqa: E402
+import sysaudio  # noqa: E402
+import vocab  # noqa: E402
 
 logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 for noisy in ("nemo_logger", "nemo", "NeMo"):
@@ -28,7 +31,7 @@ WEB = Path(__file__).resolve().parent.parent / "web"
 app = FastAPI(title="Murmur")
 app.mount("/static", StaticFiles(directory=WEB), name="static")
 
-EDITABLE = {"title", "notes", "enhanced", "template", "speakers"}
+EDITABLE = {"title", "notes", "enhanced", "template", "speakers", "vocabulary"}
 
 
 def _get(mid: str) -> dict:
@@ -48,7 +51,7 @@ def index():
 
 @app.get("/api/status")
 def status():
-    return {"models": pipeline.status}
+    return {"models": pipeline.status, "native_audio": sysaudio.available()}
 
 
 @app.get("/api/templates")
@@ -156,16 +159,28 @@ async def make_title(mid: str):
     return {"title": title}
 
 
+@app.get("/api/vocabulary")
+def get_vocabulary():
+    return {"text": "\n".join(vocab.read_global())}
+
+
+@app.put("/api/vocabulary")
+def put_vocabulary(body: dict = Body(...)):
+    vocab.write_global(body.get("text", ""))
+    return {"ok": True}
+
+
 @app.post("/api/meetings/{mid}/reprocess")
 async def reprocess(mid: str):
-    _get(mid)
+    m = _get(mid)
     path = store.audio_path(mid)
     if not path.exists():
         raise HTTPException(400, "no recording for this meeting")
     if not pipeline.gpu_lock.acquire(blocking=False):
         raise HTTPException(409, "busy recording or processing")
     try:
-        segs, dur = await asyncio.to_thread(pipeline.reprocess, path)
+        segs, dur = await asyncio.to_thread(pipeline.reprocess, path, m.get("sessions"),
+                                            vocab.meeting_terms(m))
     finally:
         pipeline.gpu_lock.release()
     return store.update(mid, transcript=segs, duration=dur)
@@ -173,6 +188,10 @@ async def reprocess(mid: str):
 
 @app.websocket("/ws/record/{mid}")
 async def record(ws: WebSocket, mid: str):
+    """Protocol: first a text frame {"type":"start","system":"none"|"browser"|"native"}, then
+    binary Float32 16 kHz frames — mono mic, or interleaved [mic, computer] for "browser" —
+    and finally {"type":"stop"}. The server pushes {"type":"transcript"} with the full
+    transcript whenever it changes, plus "partial", "status" and "error" messages."""
     await ws.accept()
     try:
         m = _get(mid)
@@ -185,10 +204,34 @@ async def record(ws: WebSocket, mid: str):
         await ws.close()
         return
 
+    try:
+        first = await asyncio.wait_for(ws.receive(), timeout=15)
+        cfg = json.loads(first.get("text") or "{}") if first["type"] == "websocket.receive" else None
+    except Exception:
+        cfg = None
+    if cfg is None:
+        pipeline.gpu_lock.release()
+        return
+    source = cfg.get("system", "none")
+    if source not in ("none", "browser", "native"):
+        source = "none"
+    native = None
+    if source == "native":
+        if sysaudio.available():
+            native = sysaudio.NativeSystemAudio()
+        else:
+            await ws.send_json({"type": "error", "text": "Native audio helper not built — recording mic only"})
+            source = "none"
+    dual = source != "none"
+    channels = 2 if source == "browser" else 1
+
     loop = asyncio.get_running_loop()
     inbox: queue.Queue = queue.Queue()
     outbox: asyncio.Queue = asyncio.Queue()
     send = lambda msg: loop.call_soon_threadsafe(outbox.put_nowait, msg)  # noqa: E731
+
+    prior = list(m.get("transcript", []))       # transcript from earlier recording sessions
+    offset = float(m.get("duration", 0.0))
 
     def worker():
         """Owns the LiveSession; all model work happens on this thread."""
@@ -196,9 +239,10 @@ async def record(ws: WebSocket, mid: str):
         try:
             if any(v != "ready" for k, v in pipeline.status.items() if k != "Language model"):
                 send({"type": "status", "text": "Loading speech models (first run downloads them)…"})
-            sess = pipeline.LiveSession(time_offset=m.get("duration", 0.0))
-            send({"type": "status", "text": "Listening…"})
+            sess = pipeline.LiveSession(dual=dual, time_offset=offset, terms=vocab.meeting_terms(m))
+            send({"type": "status", "text": "Listening (mic + computer audio)…" if dual else "Listening…"})
             backlog = np.zeros(0, np.float32)
+            warned, last_vocab = False, time.time()
             while True:
                 item = inbox.get()
                 if item is None:
@@ -212,39 +256,58 @@ async def record(ws: WebSocket, mid: str):
                         break
                     parts.append(nxt)
                 backlog = np.concatenate([backlog, *parts])
-                if len(backlog) < 1600:
+                if len(backlog) < 1600 * channels:
                     continue
-                segs, partial = sess.feed(backlog)
-                backlog = np.zeros(0, np.float32)
-                _publish(segs)
+                n = len(backlog) // channels * channels
+                frame, backlog = backlog[:n], backlog[n:]
+                if channels == 2:
+                    st = frame.reshape(-1, 2)
+                    mic, sysc = st[:, 0].copy(), st[:, 1].copy()
+                else:
+                    mic = frame
+                    sysc = native.take(len(mic)) if native else None
+                changed, partial = sess.feed(mic, sysc)
+                if changed:
+                    _publish(sess)
                 if partial is not None:
                     send({"type": "partial", "text": partial})
-            if len(backlog):
-                _publish(sess.feed(backlog)[0])
-            _publish(sess.finish())
+                if native and not native.alive and not warned:
+                    warned = True
+                    send({"type": "error", "text": "Computer audio capture stopped. " + (native.error or
+                          "Allow Screen & System Audio Recording for your terminal in System Settings.")})
+                if time.time() - last_vocab > 15:      # pick up vocabulary edits mid-meeting
+                    last_vocab = time.time()
+                    cur = store.get(mid)
+                    if cur:
+                        sess.update_terms(vocab.meeting_terms(cur))
+            sess.finish()
+            _publish(sess)
         except Exception as e:
             log.exception("live pipeline failed")
             send({"type": "error", "text": f"Transcription error: {e}"})
         finally:
-            if sess is not None and len(sess.audio):
-                dur = pipeline.append_wav(store.audio_path(mid), sess.session_audio())
-                store.update(mid, duration=dur)
+            if native:
+                native.stop()
+            if sess is not None and sess.mic_audio:
+                audio2 = sess.audio()
+                dur = pipeline.append_wav(store.audio_path(mid), audio2)
+                cur = store.get(mid)
+                if cur:
+                    sessions = cur.get("sessions") or []
+                    if not sessions and offset > 0:   # recording made before sessions were tracked
+                        sessions.append({"start": 0.0, "end": offset, "dual": False})
+                    sessions.append({"start": offset, "end": dur, "dual": dual, "source": source})
+                    cur["sessions"], cur["duration"] = sessions, dur
+                    store.save(cur)
             send(None)
 
-    def _publish(segs):
-        if not segs:
-            return
+    def _publish(sess):
         cur = store.get(mid)
-        tr = cur["transcript"]
-        for s in segs:
-            last = tr[-1] if tr else None
-            if last and last["speaker"] == s["speaker"] and s["start"] - last["end"] < 2:
-                last["text"] += " " + s["text"]
-                last["end"] = s["end"]
-            else:
-                tr.append(dict(s))
-            send({"type": "segment", "segment": s})
+        if cur is None:
+            return
+        cur["transcript"] = prior + sess.segments()
         store.save(cur)
+        send({"type": "transcript", "transcript": cur["transcript"]})
 
     t = threading.Thread(target=worker, daemon=True)
     t.start()

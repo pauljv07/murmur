@@ -33,6 +33,8 @@ def new_meeting(title: str = "") -> dict:
         "speakers": {},       # "0" -> "Alice"
         "duration": 0.0,
         "chat": [],           # [{role, content}]
+        "vocabulary": "",     # names / jargon for this meeting (comma or newline separated)
+        "sessions": [],       # [{start, end, dual, source}] one per recording session
     }
     save(m)
     return m

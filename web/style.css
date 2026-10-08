@@ -75,8 +75,8 @@ button.wide { width: 100%; }
 @keyframes pulse { 50% { opacity: .35; } }
 #meter { display: none; }
 .rec.on #meter { display: block; }
-.sys { font-size: 12px; color: var(--muted); display: flex; align-items: center; gap: 4px; white-space: nowrap; }
-#template { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px; }
+button, select { white-space: nowrap; }
+#template, #source { border: 1px solid var(--line); background: var(--card); border-radius: 8px; padding: 6px; }
 #askForm { flex: 1; display: flex; }
 #ask { flex: 1; border: 1px solid var(--line); background: var(--bg); border-radius: 8px; padding: 6px 10px; outline: none; min-width: 80px; }
 
@@ -101,3 +101,13 @@ button.wide { width: 100%; }
   #doc { padding: 24px 16px 180px; }
   #bar { flex-wrap: wrap; }
 }
+
+.vocab { border: 0; border-bottom: 1px dashed var(--line); background: transparent; outline: none; color: var(--muted);
+  font-size: 13px; padding: 4px 0; margin: -8px 0 16px; }
+.vocab:focus { color: var(--ink); border-bottom-color: var(--accent); }
+#vocabDlg { border: 1px solid var(--line); border-radius: 14px; background: var(--card); color: var(--ink); width: min(520px, 92vw); box-shadow: var(--shadow); }
+#vocabDlg::backdrop { background: rgba(0,0,0,.3); }
+#vocabDlg h3 { font-family: var(--serif); margin: 4px 0 6px; }
+#vocabDlg textarea { width: 100%; border: 1px solid var(--line); border-radius: 8px; background: var(--bg); padding: 8px; outline: none; font: 14px/1.5 var(--sans); }
+#vocabDlg .row { display: flex; gap: 6px; margin-top: 10px; }
+#sidebar > #vocabBtn { text-align: left; }

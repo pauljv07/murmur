@@ -12,6 +12,7 @@
   <button id="newBtn" class="primary wide">＋ New note</button>
   <input id="search" type="search" placeholder="Search notes">
   <nav id="list"></nav>
+  <button id="vocabBtn" class="ghost small">Custom vocabulary…</button>
   <div id="modelStatus" class="status"></div>
 </aside>
 
@@ -29,6 +30,7 @@
       <span id="date"></span>
       <span id="speakers"></span>
     </div>
+    <input id="vocab" class="vocab" placeholder="Vocabulary for this meeting — names, products, jargon (comma separated)" autocomplete="off">
     <div class="tabs">
       <button data-tab="notes" class="tab active">My notes</button>
       <button data-tab="enhanced" class="tab">Enhanced</button>
@@ -51,9 +53,11 @@
       <span class="recdot"></span><canvas id="meter" width="44" height="22"></canvas>
       <span id="recLabel">Record</span>
     </button>
-    <label class="sys" title="Also capture audio playing on this computer (e.g. a video call). Chrome will ask you to share a screen or tab with audio.">
-      <input type="checkbox" id="sysAudio"> Computer audio
-    </label>
+    <select id="source" title="What to record. Capturing computer audio separately from your mic gives the most accurate transcript: you are labelled 'Me' and remote speakers are separated by voice.">
+      <option value="native">Mic + computer audio</option>
+      <option value="browser">Mic + shared tab/screen</option>
+      <option value="none">Mic only (in person)</option>
+    </select>
     <button id="txBtn" class="ghost">Transcript</button>
     <select id="template"></select>
     <button id="enhanceBtn" class="primary">✦ Enhance</button>
@@ -71,6 +75,18 @@
   <div id="txBody"></div>
   <div id="partial"></div>
 </aside>
+
+<dialog id="vocabDlg">
+  <form method="dialog">
+    <h3>Custom vocabulary</h3>
+    <p class="status">Names, companies, products and jargon used across all your meetings — one per line.
+      They are boosted in speech recognition and used to correct spellings. Names you write in a
+      meeting's notes or title are picked up automatically.</p>
+    <textarea id="vocabText" rows="12"></textarea>
+    <div class="row"><span class="spacer"></span><button value="cancel" class="ghost">Cancel</button>
+      <button id="vocabSave" value="save" class="primary">Save</button></div>
+  </form>
+</dialog>
 
 <script src="/static/md.js"></script>
 <script src="/static/app.js"></script>

@@ -10,7 +10,8 @@ const toast = msg => {
   document.body.append(t); setTimeout(() => t.remove(), 2600);
 };
 const fmtTime = s => { s = Math.floor(s); return `${String(Math.floor(s / 60)).padStart(2, "0")}:${String(s % 60).padStart(2, "0")}`; };
-const COLORS = ["var(--s0)", "var(--s1)", "var(--s2)", "var(--s3)"];
+const COLORS = ["var(--s1)", "var(--s2)", "var(--s3)", "var(--s0)"];
+const colorOf = spk => String(spk) === "me" ? "var(--accent)" : COLORS[+spk % 4];
 
 let meetings = [], cur = null, tab = "notes", rec = null, busy = false;
 
@@ -55,6 +56,7 @@ async function open(id) {
   $("#chatPanel").hidden = true; $("#chatLog").innerHTML = "";
   $("#title").value = cur.title || "";
   $("#notes").value = cur.notes || "";
+  $("#vocab").value = cur.vocabulary || "";
   $("#template").value = cur.template || "general";
   $("#date").textContent = new Date(cur.created * 1000).toLocaleString([], { dateStyle: "medium", timeStyle: "short" });
   setTab(cur.enhanced ? "enhanced" : "notes");
@@ -107,13 +109,14 @@ function saveSoon(fields) {
 }
 
 // --------------------------------------------------------------- speakers + transcript
-const speakerName = s => (cur.speakers || {})[s] || `Speaker ${+s + 1}`;
+const speakerName = s => (cur.speakers || {})[s] || (s === "me" ? "Me" : `Speaker ${+s + 1}`);
 function renderSpeakers() {
-  const ids = [...new Set((cur.transcript || []).map(s => String(s.speaker)))].sort();
+  const ids = [...new Set((cur.transcript || []).map(s => String(s.speaker)))]
+    .sort((a, b) => a === "me" ? -1 : b === "me" ? 1 : a - b);
   const box = $("#speakers"); box.innerHTML = "";
   for (const id of ids) {
     const c = document.createElement("span"); c.className = "chip"; c.title = "Click to rename";
-    c.innerHTML = `<i style="background:${COLORS[id % 4]}"></i>`;
+    c.innerHTML = `<i style="background:${colorOf(id)}"></i>`;
     c.append(speakerName(id));
     c.onclick = async () => {
       const n = prompt("Name for this speaker", speakerName(id));
@@ -127,7 +130,7 @@ function renderSpeakers() {
 }
 function segEl(s) {
   const d = document.createElement("div"); d.className = "seg";
-  d.innerHTML = `<div class="who" style="color:${COLORS[s.speaker % 4]}"><span></span><time>${fmtTime(s.start)}</time></div><div class="txt"></div>`;
+  d.innerHTML = `<div class="who" style="color:${colorOf(s.speaker)}"><span></span><time>${fmtTime(s.start)}</time></div><div class="txt"></div>`;
   d.querySelector(".who span").textContent = speakerName(String(s.speaker));
   d.querySelector(".txt").textContent = s.text;
   return d;
@@ -138,17 +141,12 @@ function renderTranscript() {
   if (!(cur.transcript || []).length) b.innerHTML = `<p class="status">Nothing transcribed yet.</p>`;
   b.scrollTop = b.scrollHeight;
 }
-function addSegment(s) {
+function setTranscript(tr) {
   const b = $("#txBody");
-  if (!cur.transcript.length) b.innerHTML = "";
-  const last = cur.transcript[cur.transcript.length - 1];
   const nearBottom = b.scrollHeight - b.scrollTop - b.clientHeight < 80;
-  if (last && last.speaker === s.speaker && s.start - last.end < 2) {   // continue the same turn
-    last.text += " " + s.text; last.end = s.end;
-    b.lastElementChild.querySelector(".txt").textContent = last.text;
-  } else {
-    cur.transcript.push(s); b.append(segEl(s));
-  }
+  cur.transcript = tr;
+  b.innerHTML = "";
+  for (const s of tr) b.append(segEl(s));
   if (nearBottom) b.scrollTop = b.scrollHeight;
   renderSpeakers();
 }
@@ -172,31 +170,40 @@ async function ensureNote() {
 
 async function startRecording() {
   const m = await ensureNote();
+  const source = $("#source").value;
   const mic = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 } });
+    audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true, channelCount: 1 } });
   const streams = [mic];
-  if ($("#sysAudio").checked) {
+  let sysStream = null;
+  if (source === "browser") {
     try {
-      const disp = await navigator.mediaDevices.getDisplayMedia({ video: true, audio: true, systemAudio: "include" });
+      const disp = await navigator.mediaDevices.getDisplayMedia({
+        video: true, systemAudio: "include",
+        // keep the remote audio untouched: processing it only hurts recognition
+        audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false } });
       disp.getVideoTracks().forEach(t => t.stop());
-      if (disp.getAudioTracks().length) streams.push(disp);
-      else toast("No computer audio shared — recording mic only");
-    } catch { toast("Computer audio not shared — recording mic only"); }
+      if (disp.getAudioTracks().length) { sysStream = disp; streams.push(disp); }
+      else toast("No audio was shared — recording mic only");
+    } catch { toast("Nothing shared — recording mic only"); }
   }
+  const stereo = !!sysStream;
   const ctx = new AudioContext({ sampleRate: 16000 });
   await ctx.audioWorklet.addModule("/static/recorder-worklet.js");
-  const node = new AudioWorkletNode(ctx, "recorder");
+  const node = new AudioWorkletNode(ctx, "recorder", { numberOfInputs: 2, processorOptions: { stereo } });
   const analyser = ctx.createAnalyser(); analyser.fftSize = 512;
-  for (const st of streams) ctx.createMediaStreamSource(st).connect(node);
-  for (const st of streams) ctx.createMediaStreamSource(st).connect(analyser);
-
+  ctx.createMediaStreamSource(mic).connect(node, 0, 0);
+  ctx.createMediaStreamSource(mic).connect(analyser);
+  if (sysStream) {
+    ctx.createMediaStreamSource(sysStream).connect(node, 0, 1);
+    ctx.createMediaStreamSource(sysStream).connect(analyser);
+  }
   const cleanup = () => { streams.forEach(s => s.getTracks().forEach(t => t.stop())); ctx.close(); };
   const ws = new WebSocket(`${location.protocol === "https:" ? "wss" : "ws"}://${location.host}/ws/record/${m.id}`);
   ws.binaryType = "arraybuffer";
   ws.onmessage = e => {
     const msg = JSON.parse(e.data);
     if (!cur || cur.id !== m.id) return;          // user navigated away mid-message
-    if (msg.type === "segment") addSegment(msg.segment);
+    if (msg.type === "transcript") setTranscript(msg.transcript);
     else if (msg.type === "partial") $("#partial").textContent = msg.text;
     else if (msg.type === "status") $("#partial").textContent = msg.text;
     else if (msg.type === "error") toast(msg.text);
@@ -209,6 +216,7 @@ async function startRecording() {
       ws.onerror = () => rej(new Error("could not connect to the local server"));
     });
   } catch (e) { cleanup(); throw e; }
+  ws.send(JSON.stringify({ type: "start", system: stereo ? "browser" : source === "native" ? "native" : "none" }));
   node.port.onmessage = e => { if (ws.readyState === 1) ws.send(e.data.buffer); };
 
   rec = { ws, ctx, streams, analyser, started: Date.now(), meeting: m };
@@ -317,6 +325,16 @@ $("#search").oninput = renderList;
 $("#title").oninput = e => saveSoon({ title: e.target.value });
 $("#notes").oninput = e => saveSoon({ notes: e.target.value });
 $("#template").onchange = e => saveSoon({ template: e.target.value });
+$("#vocab").oninput = e => saveSoon({ vocabulary: e.target.value });
+$("#source").onchange = e => { try { localStorage.setItem("murmur.source", e.target.value); } catch {} };
+$("#vocabBtn").onclick = async () => {
+  $("#vocabText").value = (await api("/api/vocabulary")).text;
+  $("#vocabDlg").showModal();
+};
+$("#vocabSave").onclick = async () => {
+  await api("/api/vocabulary", { method: "PUT", body: { text: $("#vocabText").value } });
+  toast("Vocabulary saved");
+};
 document.querySelectorAll(".tab").forEach(b => b.onclick = () => setTab(b.dataset.tab));
 $("#editEnhanced").onclick = () => {
   const ed = $("#enhancedEdit");
@@ -367,6 +385,9 @@ document.addEventListener("keydown", e => {
 async function pollStatus() {
   try {
     const s = await api("/api/status");
+    const nat = $("#source option[value=native]");
+    nat.disabled = !s.native_audio;
+    if (!s.native_audio && $("#source").value === "native") $("#source").value = "browser";
     $("#modelStatus").innerHTML = Object.entries(s.models)
       .map(([k, v]) => `<div>${v === "ready" ? '<span class="ok">●</span>' : "○"} ${k}: ${v}</div>`).join("");
     if (Object.values(s.models).some(v => v !== "ready")) setTimeout(pollStatus, 3000);
@@ -376,6 +397,7 @@ async function pollStatus() {
 (async () => {
   const t = await api("/api/templates");
   $("#template").innerHTML = Object.entries(t).map(([k, v]) => `<option value="${k}">${v}</option>`).join("");
+  try { const src = localStorage.getItem("murmur.source"); if (src) $("#source").value = src; } catch {}
   await loadList();
   const id = location.hash.slice(1);
   if (id && meetings.some(m => m.id === id)) open(id);

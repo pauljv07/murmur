@@ -8,8 +8,14 @@ on this Mac. No audio or text leaves the machine (after the one-time model downl
 
     ./run.sh              # then open http://127.0.0.1:8765
 
-Use Chrome for the "Computer audio" toggle (captures a call/tab playing on this machine
-alongside the mic). Without it only the microphone is recorded, so use speakers instead of headphones.
+Pick what to record in the bottom bar:
+
+- **Mic + computer audio** (default, most accurate): a native helper (`native/syscap`, ScreenCaptureKit)
+  captures whatever the Mac plays (Zoom, Meet, Teams, browser...) as a separate channel. Your
+  mic is labelled **Me**; the remote side is diarized into Speaker 1, 2, ... First use needs
+  *Screen & System Audio Recording* permission for your terminal (System Settings → Privacy & Security).
+- **Mic + shared tab/screen**: same two-channel pipeline, but Chrome captures the audio (no helper needed).
+- **Mic only**: for in-person meetings; everyone is separated by voice.
 
 ## Models
 
@@ -21,7 +27,30 @@ alongside the mic). Without it only the microphone is recorded, so use speakers 
 
 Override with env vars: `MURMUR_DIAR_MODEL`, `MURMUR_ASR_MODEL`, `MURMUR_LLM`
 (e.g. `mlx-community/Qwen3-8B-4bit` for better notes, slower), `MURMUR_DIAR_DEVICE`,
-`MURMUR_ASR_DEVICE`, `MURMUR_DIAR_CHUNK` (Sortformer chunk in 80 ms frames; default 31 ≈ 2.5 s).
+`MURMUR_ASR_DEVICE`, `MURMUR_DIAR_CHUNK` (Sortformer chunk in 80 ms frames; default 31 ≈ 2.5 s),
+`MURMUR_BOOST_ALPHA` (vocabulary boost strength, default 1.0).
+
+## Transcript accuracy
+
+What Murmur does to get the transcript right:
+
+| Technique | What it fixes |
+|---|---|
+| Separate mic / computer-audio channels | Who said what: your words are "Me" with certainty; remote speech is clean digital audio |
+| Echo removal (per word: same word on both channels at the same moment, or computer audio louder than the mic) | Remote voices leaking from your speakers into the mic are not transcribed twice |
+| Custom vocabulary → Parakeet phrase boosting (NeMo GPU-PB boosting tree) | Names, products, jargon. Sources: per-meeting field, global list (sidebar), speaker names, proper nouns in your notes/title |
+| Conservative spelling fix against the vocabulary | Terms boosting still missed ("Cuba Flow" → "Kubeflow"); never rewrites ordinary words into terms |
+| 3 s of preceding audio as ASR context; cuts at pauses | Words at chunk boundaries |
+| Speaker smoothing + sentence-boundary fix | One-word speaker flicker; first word of a turn sticking to the previous speaker |
+| **Refine**: whole-recording pass, Sortformer high-accuracy setting (30 s chunks), 40 s ASR windows, one diarization run per channel across all sessions | Live-mode compromises |
+
+Benchmark (synthetic 3-person call, 42 s, remote audio leaking into the mic at −18 dB):
+
+| Mode | WER live | WER refined | Words with correct speaker |
+|---|---|---|---|
+| Previous: mic + computer audio mixed into one stream | 10.6% | 7.7% | ~70% |
+| Two channels + vocabulary | 5.8% | 3.8% | 100% |
+| Two channels + vocabulary, native capture through the speakers | ~0% | 0% | 100% |
 
 ## How it works
 
