@@ -2,7 +2,7 @@
 import os
 import threading
 
-MODEL_ID = os.environ.get("MURMUR_LLM", "mlx-community/Qwen3-4B-Instruct-2507-4bit")
+MODEL_ID = os.environ.get("MURMUR_LLM", "mlx-community/Qwen3-8B-4bit")
 MAX_TRANSCRIPT_CHARS = int(os.environ.get("MURMUR_MAX_TRANSCRIPT_CHARS", "60000"))
 
 _model = None
@@ -26,11 +26,35 @@ def stream(messages: list[dict], max_tokens: int = 1500, temp: float = 0.3):
     from mlx_lm.sample_utils import make_sampler
 
     model, tok = load()
-    prompt = tok.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
+    try:
+        # Qwen3 hybrid models: answer directly, no <think> reasoning block
+        prompt = tok.apply_chat_template(messages, add_generation_prompt=True, tokenize=False,
+                                         enable_thinking=False)
+    except TypeError:
+        prompt = tok.apply_chat_template(messages, add_generation_prompt=True, tokenize=False)
     with _gen_lock:
-        for r in stream_generate(model, tok, prompt, max_tokens=max_tokens,
-                                 sampler=make_sampler(temp=temp)):
-            yield r.text
+        yield from _strip_think(r.text for r in stream_generate(
+            model, tok, prompt, max_tokens=max_tokens, sampler=make_sampler(temp=temp)))
+
+
+def _strip_think(pieces):
+    """Drop any <think>...</think> block a reasoning model emits before its answer."""
+    buf, done = "", False
+    for p in pieces:
+        if done:
+            yield p
+            continue
+        buf += p
+        if "<think>" not in buf:
+            if len(buf) >= 7 or not "<think>".startswith(buf.lstrip()):
+                done = True
+                yield buf.lstrip() if buf.strip() else buf
+            continue
+        if "</think>" in buf:
+            done = True
+            rest = buf.split("</think>", 1)[1].lstrip()
+            if rest:
+                yield rest
 
 
 def complete(messages: list[dict], **kw) -> str:

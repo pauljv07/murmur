@@ -23,10 +23,10 @@ Pick what to record in the bottom bar:
 |---|---|---|
 | Speaker diarization | `nvidia/diar_streaming_sortformer_4spk-v2.1` (Streaming Sortformer, up to 4 speakers) | NeMo / PyTorch (MPS) |
 | Speech-to-text | `nvidia/parakeet-tdt-0.6b-v3` (25 languages, word timestamps) | NeMo / PyTorch (CPU) |
-| Notes, titles, chat | `mlx-community/Qwen3-4B-Instruct-2507-4bit` | MLX |
+| Notes, titles, chat | `mlx-community/Qwen3-8B-4bit` (thinking mode off) | MLX |
 
 Override with env vars: `MURMUR_DIAR_MODEL`, `MURMUR_ASR_MODEL`, `MURMUR_LLM`
-(e.g. `mlx-community/Qwen3-8B-4bit` for better notes, slower), `MURMUR_DIAR_DEVICE`,
+(e.g. `mlx-community/Qwen3-4B-Instruct-2507-4bit` for a lighter, faster model), `MURMUR_DIAR_DEVICE`,
 `MURMUR_ASR_DEVICE`, `MURMUR_DIAR_CHUNK` (Sortformer chunk in 80 ms frames; default 31 ≈ 2.5 s),
 `MURMUR_BOOST_ALPHA` (vocabulary boost strength, default 1.0).
 
