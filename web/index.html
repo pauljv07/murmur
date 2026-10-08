@@ -1,0 +1,78 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Murmur</title>
+<link rel="stylesheet" href="/static/style.css">
+</head>
+<body>
+<aside id="sidebar">
+  <div class="brand"><span class="dot"></span> Murmur</div>
+  <button id="newBtn" class="primary wide">＋ New note</button>
+  <input id="search" type="search" placeholder="Search notes">
+  <nav id="list"></nav>
+  <div id="modelStatus" class="status"></div>
+</aside>
+
+<main id="main">
+  <div id="empty" class="empty">
+    <h2>Local meeting notes</h2>
+    <p>Press <b>New note</b>, start recording, and jot rough notes. When you're done,
+      <b>Enhance</b> merges your notes with the transcript. Everything — speech recognition,
+      speaker diarization and the language model — runs on this machine.</p>
+  </div>
+
+  <section id="doc" hidden>
+    <input id="title" placeholder="Untitled meeting" autocomplete="off">
+    <div class="meta">
+      <span id="date"></span>
+      <span id="speakers"></span>
+    </div>
+    <div class="tabs">
+      <button data-tab="notes" class="tab active">My notes</button>
+      <button data-tab="enhanced" class="tab">Enhanced</button>
+      <span class="spacer"></span>
+      <button id="editEnhanced" class="ghost small" hidden>Edit</button>
+      <button id="copyBtn" class="ghost small">Copy</button>
+      <button id="deleteBtn" class="ghost small danger">Delete</button>
+    </div>
+    <textarea id="notes" placeholder="Write rough notes here while you listen…"></textarea>
+    <div id="enhancedView" class="md" hidden></div>
+    <textarea id="enhancedEdit" hidden></textarea>
+  </section>
+
+  <div id="chatPanel" hidden>
+    <div id="chatLog"></div>
+  </div>
+
+  <div id="bar" hidden>
+    <button id="recBtn" class="rec" title="Start / stop recording">
+      <span class="recdot"></span><canvas id="meter" width="44" height="22"></canvas>
+      <span id="recLabel">Record</span>
+    </button>
+    <label class="sys" title="Also capture audio playing on this computer (e.g. a video call). Chrome will ask you to share a screen or tab with audio.">
+      <input type="checkbox" id="sysAudio"> Computer audio
+    </label>
+    <button id="txBtn" class="ghost">Transcript</button>
+    <select id="template"></select>
+    <button id="enhanceBtn" class="primary">✦ Enhance</button>
+    <form id="askForm"><input id="ask" placeholder="Ask about this meeting…" autocomplete="off"></form>
+  </div>
+</main>
+
+<aside id="transcript" hidden>
+  <header>
+    <b>Transcript</b>
+    <span class="spacer"></span>
+    <button id="redoBtn" class="ghost small" title="Re-run diarization and transcription on the full recording for higher accuracy">Refine</button>
+    <button id="txClose" class="ghost small">✕</button>
+  </header>
+  <div id="txBody"></div>
+  <div id="partial"></div>
+</aside>
+
+<script src="/static/md.js"></script>
+<script src="/static/app.js"></script>
+</body>
+</html>

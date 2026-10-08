@@ -1,0 +1,5 @@
+nemo_toolkit[asr]
+fastapi
+uvicorn[standard]
+mlx-lm
+soundfile
